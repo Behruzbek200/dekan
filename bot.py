@@ -19,10 +19,8 @@ load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
-
-USE_WEBHOOK = os.getenv("USE_WEBHOOK", "false").lower() == "true"
 WEBHOOK_URL = os.getenv("WEBHOOK_URL", "").rstrip("/")
-WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "webhook-secret")
+WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "dekan-bot-secret")
 PORT = int(os.getenv("PORT", "10000"))
 
 if not BOT_TOKEN:
@@ -32,11 +30,7 @@ if not ADMIN_ID:
     raise ValueError("ADMIN_ID .env ichida yo'q!")
 
 bot = telebot.TeleBot(BOT_TOKEN, parse_mode="HTML")
-server = Flask(__name__)
-
-# =========================
-# XOTIRA
-# =========================
+app = Flask(__name__)
 
 user_states = {}
 
@@ -76,9 +70,8 @@ CONTENT_TYPES = [
     "dice"
 ]
 
-
 # =========================
-# MENU FUNKSIYALAR
+# MENU
 # =========================
 
 def main_menu():
@@ -94,6 +87,12 @@ def main_menu():
     return markup
 
 
+def user_waiting_menu():
+    markup = ReplyKeyboardMarkup(resize_keyboard=True, row_width=1)
+    markup.add(KeyboardButton(BTN_CANCEL))
+    return markup
+
+
 def user_confirm_menu():
     markup = ReplyKeyboardMarkup(resize_keyboard=True, row_width=1)
     markup.add(KeyboardButton(BTN_ADD_MORE_USER))
@@ -102,7 +101,7 @@ def user_confirm_menu():
     return markup
 
 
-def user_waiting_menu():
+def admin_waiting_menu():
     markup = ReplyKeyboardMarkup(resize_keyboard=True, row_width=1)
     markup.add(KeyboardButton(BTN_CANCEL))
     return markup
@@ -112,12 +111,6 @@ def admin_confirm_menu():
     markup = ReplyKeyboardMarkup(resize_keyboard=True, row_width=1)
     markup.add(KeyboardButton(BTN_ADD_MORE_ADMIN))
     markup.add(KeyboardButton(BTN_SEND_TO_USER))
-    markup.add(KeyboardButton(BTN_CANCEL))
-    return markup
-
-
-def admin_waiting_menu():
-    markup = ReplyKeyboardMarkup(resize_keyboard=True, row_width=1)
     markup.add(KeyboardButton(BTN_CANCEL))
     return markup
 
@@ -141,18 +134,8 @@ def safe(value, default="Mavjud emas"):
     return default
 
 
-def make_user_link(user_id, first_name, username):
-    if username:
-        username = html.escape(username)
-        return f'<a href="https://t.me/{username}">@{username}</a>'
-
-    first_name = safe(first_name, "Foydalanuvchi")
-    return f'<a href="tg://user?id={user_id}">{first_name}</a>'
-
-
 def save_user_info(message):
     user = message.from_user
-
     return {
         "user_id": user.id,
         "chat_id": message.chat.id,
@@ -160,6 +143,15 @@ def save_user_info(message):
         "last_name": user.last_name or "",
         "username": user.username or ""
     }
+
+
+def make_user_link(user_id, first_name, username):
+    if username:
+        username = html.escape(username)
+        return f'<a href="https://t.me/{username}">@{username}</a>'
+
+    first_name = safe(first_name, "Foydalanuvchi")
+    return f'<a href="tg://user?id={user_id}">{first_name}</a>'
 
 
 def make_admin_header(state):
@@ -191,15 +183,13 @@ def is_control_button(message):
     if not message.text:
         return False
 
-    control_buttons = [
+    return message.text in [
         BTN_ADD_MORE_USER,
         BTN_SEND_TO_ADMIN,
         BTN_ADD_MORE_ADMIN,
         BTN_SEND_TO_USER,
         BTN_CANCEL
     ]
-
-    return message.text in control_buttons
 
 
 # =========================
@@ -282,7 +272,8 @@ def send_user_appeal_to_admin(message):
     if not message_ids:
         bot.send_message(
             chat_id,
-            "⚠️ Siz hali hech qanday ma’lumot yubormadingiz.\n\nAvval matn, rasm, video, audio yoki fayl yuboring.",
+            "⚠️ Siz hali hech qanday ma’lumot yubormadingiz.\n\n"
+            "Avval matn, rasm, video, audio yoki fayl yuboring.",
             reply_markup=user_waiting_menu()
         )
         return
@@ -409,7 +400,8 @@ def send_admin_reply_to_user(message):
     if not message_ids:
         bot.send_message(
             ADMIN_ID,
-            "⚠️ Siz hali hech qanday javob yubormadingiz.\n\nAvval matn, rasm, video, audio yoki fayl yuboring.",
+            "⚠️ Siz hali hech qanday javob yubormadingiz.\n\n"
+            "Avval matn, rasm, video, audio yoki fayl yuboring.",
             reply_markup=admin_waiting_menu()
         )
         return
@@ -477,7 +469,8 @@ def fallback(message):
     if message.from_user.id == ADMIN_ID:
         bot.send_message(
             message.chat.id,
-            "Admin sifatida javob berish uchun avval murojaat ostidagi <b>✍️ Javob berish</b> tugmasini bosing."
+            "Admin sifatida javob berish uchun avval murojaat ostidagi "
+            "<b>✍️ Javob berish</b> tugmasini bosing."
         )
     else:
         bot.send_message(
@@ -488,44 +481,49 @@ def fallback(message):
 
 
 # =========================
-# WEBHOOK QISMI
+# FLASK WEBHOOK QISMI
 # =========================
 
-@server.route("/", methods=["GET"])
-def index():
-    return "Bot ishlayapti ✅"
+@app.route("/", methods=["GET"])
+def home():
+    return "Dekan bot Flask orqali ishlayapti ✅", 200
 
 
-@server.route(f"/{WEBHOOK_SECRET}", methods=["POST"])
-def webhook():
-    if request.headers.get("content-type") == "application/json":
-        json_string = request.get_data().decode("utf-8")
-        update = telebot.types.Update.de_json(json_string)
-        bot.process_new_updates([update])
-        return "", 200
+@app.route(f"/{WEBHOOK_SECRET}", methods=["POST"])
+def telegram_webhook():
+    if not request.is_json:
+        abort(403)
 
-    abort(403)
+    update_json = request.get_data().decode("utf-8")
+    update = telebot.types.Update.de_json(update_json)
+    bot.process_new_updates([update])
+
+    return "", 200
 
 
 # =========================
-# BOTNI ISHGA TUSHIRISH
+# WEBHOOKNI O'RNATISH
 # =========================
 
-if __name__ == "__main__":
-    if USE_WEBHOOK:
-        if not WEBHOOK_URL:
-            raise ValueError("USE_WEBHOOK=true bo‘lsa WEBHOOK_URL ham .env ichida bo‘lishi kerak!")
-
+def setup_webhook():
+    if WEBHOOK_URL:
         webhook_full_url = f"{WEBHOOK_URL}/{WEBHOOK_SECRET}"
 
         bot.remove_webhook()
         bot.set_webhook(url=webhook_full_url)
 
-        print("Bot webhook rejimida ishga tushdi...")
-        print(f"Webhook URL: {webhook_full_url}")
-
-        server.run(host="0.0.0.0", port=PORT)
+        print("Webhook o‘rnatildi:")
+        print(webhook_full_url)
     else:
-        bot.remove_webhook()
-        print("Bot polling rejimida ishga tushdi...")
-        bot.infinity_polling(skip_pending=True)
+        print("WEBHOOK_URL topilmadi. Webhook o‘rnatilmadi.")
+
+
+setup_webhook()
+
+
+# =========================
+# LOCAL FLASK RUN
+# =========================
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=PORT)
